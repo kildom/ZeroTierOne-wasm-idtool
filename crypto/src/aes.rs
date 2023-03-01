@@ -16,7 +16,7 @@ impl<const ENCRYPT: bool> AesGcm<ENCRYPT> {
     /// Create an AesGcm context with the given key, key must be 16, 24 or 32 bytes long.
     /// OpenSSL internally processes and caches this key, so it is recommended to reuse this context whenever encrypting under the same key. Call `set_iv` to change the IV for each reuse.
     pub fn new<const KEY_SIZE: usize>(key: &Secret<KEY_SIZE>) -> Self {
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
         unsafe {
             let t = match KEY_SIZE {
                 16 => ffi::EVP_aes_128_gcm(),
@@ -34,7 +34,7 @@ impl<const ENCRYPT: bool> AesGcm<ENCRYPT> {
     /// Set the IV of this AesGcm context. This call resets the IV but leaves the key and encryption algorithm alone.
     /// This method must be called before any other method on AesGcm.
     /// `iv` must be exactly 12 bytes in length, because that is what Aes supports.
-    pub fn set_iv(&mut self, iv: &[u8]) {
+    pub fn set_iv(&self, iv: &[u8]) {
         debug_assert_eq!(iv.len(), 12, "Aes IV must be 12 bytes long");
         unsafe {
             self.0.cipher_init::<ENCRYPT>(ptr::null(), ptr::null(), iv.as_ptr()).unwrap();
@@ -43,20 +43,20 @@ impl<const ENCRYPT: bool> AesGcm<ENCRYPT> {
 
     /// Add additional authentication data to AesGcm (same operation with CTR mode).
     #[inline(always)]
-    pub fn aad(&mut self, aad: &[u8]) {
+    pub fn aad(&self, aad: &[u8]) {
         unsafe { self.0.update::<ENCRYPT>(aad, ptr::null_mut()).unwrap() };
     }
 
     /// Encrypt or decrypt (same operation with CTR mode)
     #[inline(always)]
-    pub fn crypt(&mut self, input: &[u8], output: &mut [u8]) {
+    pub fn crypt(&self, input: &[u8], output: &mut [u8]) {
         debug_assert!(output.len() >= input.len(), "output buffer must fit the size of the input buffer");
         unsafe { self.0.update::<ENCRYPT>(input, output.as_mut_ptr()).unwrap() };
     }
 
     /// Encrypt or decrypt in place (same operation with CTR mode).
     #[inline(always)]
-    pub fn crypt_in_place(&mut self, data: &mut [u8]) {
+    pub fn crypt_in_place(&self, data: &mut [u8]) {
         let ptr = data.as_mut_ptr();
         unsafe { self.0.update::<ENCRYPT>(data, ptr).unwrap() }
     }
@@ -64,7 +64,7 @@ impl<const ENCRYPT: bool> AesGcm<ENCRYPT> {
 impl AesGcm<true> {
     /// Produce the gcm authentication tag.
     #[inline(always)]
-    pub fn finish_encrypt(&mut self) -> [u8; 16] {
+    pub fn finish_encrypt(&self) -> [u8; 16] {
         unsafe {
             let mut tag = MaybeUninit::<[u8; 16]>::uninit();
             self.0.finalize::<true>(tag.as_mut_ptr().cast()).unwrap();
@@ -76,7 +76,7 @@ impl AesGcm<true> {
 impl AesGcm<false> {
     /// Check the gcm authentication tag. Outputs true if it matches the just decrypted message, outputs false otherwise.
     #[inline(always)]
-    pub fn finish_decrypt(&mut self, expected_tag: &[u8]) -> bool {
+    pub fn finish_decrypt(&self, expected_tag: &[u8]) -> bool {
         debug_assert_eq!(expected_tag.len(), 16);
         if self.0.set_tag(expected_tag).is_ok() {
             unsafe { self.0.finalize::<false>(ptr::null_mut()).is_ok() }
@@ -97,7 +97,7 @@ impl<const ENCRYPT: bool> AesCtr<ENCRYPT> {
     /// Create an AesCtr context with the given key, key must be 16, 24 or 32 bytes long.
     /// OpenSSL internally processes and caches this key, so it is recommended to reuse this context whenever encrypting under the same key. Call `set_iv` to change the IV for each reuse.
     pub fn new<const KEY_SIZE: usize>(key: &Secret<KEY_SIZE>) -> Self {
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
         unsafe {
             let t = match KEY_SIZE {
                 16 => ffi::EVP_aes_128_ctr(),
@@ -115,7 +115,7 @@ impl<const ENCRYPT: bool> AesCtr<ENCRYPT> {
     /// Set the IV of this AesCtr context. This call resets the IV but leaves the key and encryption algorithm alone.
     /// This method must be called before any other method on AesCtr.
     /// `iv` must be exactly 12 bytes in length, because that is what Aes supports.
-    pub fn set_iv(&mut self, iv: &[u8]) {
+    pub fn set_iv(&self, iv: &[u8]) {
         debug_assert_eq!(iv.len(), 12, "Aes IV must be 12 bytes long");
         unsafe {
             self.0.cipher_init::<true>(ptr::null(), ptr::null(), iv.as_ptr()).unwrap();
@@ -124,14 +124,14 @@ impl<const ENCRYPT: bool> AesCtr<ENCRYPT> {
 
     /// Encrypt or decrypt.
     #[inline(always)]
-    pub fn crypt(&mut self, input: &[u8], output: &mut [u8]) {
+    pub fn crypt(&self, input: &[u8], output: &mut [u8]) {
         debug_assert!(output.len() >= input.len(), "output buffer must fit the size of the input buffer");
         unsafe { self.0.update::<ENCRYPT>(input, output.as_mut_ptr()).unwrap() };
     }
 
     /// Encrypt or decrypt in place.
     #[inline(always)]
-    pub fn crypt_in_place(&mut self, data: &mut [u8]) {
+    pub fn crypt_in_place(&self, data: &mut [u8]) {
         let ptr = data.as_mut_ptr();
         unsafe { self.0.update::<ENCRYPT>(data, ptr).unwrap() }
     }
@@ -147,7 +147,7 @@ impl<const ENCRYPT: bool> AesEcb<ENCRYPT> {
     /// Create an AesEcb context with the given key, key must be 16, 24 or 32 bytes long.
     /// OpenSSL internally processes and caches this key, so it is recommended to reuse this context whenever encrypting under the same key.
     pub fn new<const KEY_SIZE: usize>(key: &Secret<KEY_SIZE>) -> Self {
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
         unsafe {
             let t = match KEY_SIZE {
                 16 => ffi::EVP_aes_128_ecb(),
@@ -165,7 +165,7 @@ impl<const ENCRYPT: bool> AesEcb<ENCRYPT> {
 
     /// Do not ever encrypt the same plaintext twice. Make sure data is always different between calls.
     #[inline(always)]
-    pub fn crypt_in_place(&mut self, data: &mut [u8]) {
+    pub fn crypt_in_place(&self, data: &mut [u8]) {
         debug_assert_eq!(data.len(), AES_BLOCK_SIZE, "AesEcb should not be used to encrypt more than one block at a time unless you really know what you are doing.");
         let ptr = data.as_mut_ptr();
         unsafe { self.0.update::<ENCRYPT>(data, ptr).unwrap() }
@@ -183,8 +183,8 @@ mod test {
     fn aes_256_gcm() {
         init();
         let key = Secret::move_bytes([1u8; 32]);
-        let mut enc = AesGcm::<true>::new(&key);
-        let mut dec = AesGcm::<false>::new(&key);
+        let enc = AesGcm::<true>::new(&key);
+        let dec = AesGcm::<false>::new(&key);
 
         let plain = [2u8; 127];
         let iv0 = [3u8; 12];
@@ -233,7 +233,7 @@ mod test {
         }
         let iv = [1_u8; 12];
 
-        let mut c = AesGcm::<true>::new(&Secret::move_bytes([1_u8; 32]));
+        let c = AesGcm::<true>::new(&Secret::move_bytes([1_u8; 32]));
 
         let benchmark_iterations: usize = 80000;
         let start = SystemTime::now();
@@ -247,7 +247,7 @@ mod test {
             (((benchmark_iterations * buf.len()) as f64) / 1048576.0) / duration.as_secs_f64()
         );
 
-        let mut c = AesGcm::<false>::new(&Secret::move_bytes([1_u8; 32]));
+        let c = AesGcm::<false>::new(&Secret::move_bytes([1_u8; 32]));
 
         let start = SystemTime::now();
         for _ in 0..benchmark_iterations {
@@ -265,7 +265,7 @@ mod test {
     fn aes_gcm_test_vectors() {
         // Even though we are just wrapping other implementations, it's still good to test thoroughly!
         for tv in NIST_AES_GCM_TEST_VECTORS.iter() {
-            let mut gcm = AesGcm::new(unsafe { &Secret::<32>::from_bytes(tv.key) });
+            let gcm = AesGcm::new(unsafe { &Secret::<32>::from_bytes(tv.key) });
             gcm.set_iv(tv.nonce);
             gcm.aad(tv.aad);
             let mut ciphertext = Vec::new();
@@ -275,7 +275,7 @@ mod test {
             assert!(tag.eq(tv.tag));
             assert!(ciphertext.as_slice().eq(tv.ciphertext));
 
-            let mut gcm = AesGcm::new(unsafe { &Secret::<32>::from_bytes(tv.key) });
+            let gcm = AesGcm::new(unsafe { &Secret::<32>::from_bytes(tv.key) });
             gcm.set_iv(tv.nonce);
             gcm.aad(tv.aad);
             let mut ct_copy = ciphertext.clone();

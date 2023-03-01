@@ -25,7 +25,7 @@ impl CipherCtxRef {
 
     /// Initializes the context for encryption or decryption.
     /// All pointer fields can be null, in which case the corresponding field in the context is not updated.
-    pub unsafe fn cipher_init<const ENCRYPT: bool>(&mut self, t: *const ffi::EVP_CIPHER, key: *const u8, iv: *const u8) -> Result<(), ErrorStack>{
+    pub unsafe fn cipher_init<const ENCRYPT: bool>(&self, t: *const ffi::EVP_CIPHER, key: *const u8, iv: *const u8) -> Result<(), ErrorStack>{
         let evp_f = if ENCRYPT { ffi::EVP_EncryptInit_ex } else { ffi::EVP_DecryptInit_ex };
 
         cvt(evp_f(
@@ -55,7 +55,7 @@ impl CipherCtxRef {
     /// the input buffer. For block ciphers the size of the output
     /// buffer depends on the state of partially updated blocks.
     pub unsafe fn update<const ENCRYPT: bool>(
-        &mut self,
+        &self,
         input: &[u8],
         output: *mut u8,
     ) -> Result<(), ErrorStack> {
@@ -89,7 +89,7 @@ impl CipherCtxRef {
     /// ciphers the output buffer can be empty, for block ciphers the
     /// output buffer should be at least as big as the block.
     pub unsafe fn finalize<const ENCRYPT: bool>(
-        &mut self,
+        &self,
         output: *mut u8,
     ) -> Result<(), ErrorStack> {
         let evp_f = if ENCRYPT { ffi::EVP_EncryptFinal_ex } else { ffi::EVP_DecryptFinal_ex };
@@ -125,7 +125,7 @@ impl CipherCtxRef {
     }
 
     /// Sets the authentication tag for verification during decryption.
-    pub fn set_tag(&mut self, tag: &[u8]) -> Result<(), ErrorStack> {
+    pub fn set_tag(&self, tag: &[u8]) -> Result<(), ErrorStack> {
         unsafe {
             cvt(ffi::EVP_CIPHER_CTX_ctrl(
                 self.as_ptr(),
@@ -148,7 +148,7 @@ mod test {
     fn aes_128_ecb() {
         init();
         let key = [1u8; 16];
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
         unsafe {
             ctx.cipher_init::<true>(ffi::EVP_aes_128_ecb(), key.as_ptr(), ptr::null()).unwrap();
             ffi::EVP_CIPHER_CTX_set_padding(ctx.as_ptr(), 0);

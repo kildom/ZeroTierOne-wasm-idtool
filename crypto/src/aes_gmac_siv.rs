@@ -50,7 +50,7 @@ impl AesGmacSiv {
         self.tag[0..8].copy_from_slice(iv);
         self.tag[8..12].fill(0);
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k0.len() {
 				16 => ffi::EVP_aes_128_gcm(),
@@ -107,7 +107,7 @@ impl AesGmacSiv {
 
         let mut tag_tmp = [0_u8; 32];
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k1.len() {
 				16 => ffi::EVP_aes_128_ecb(),
@@ -124,7 +124,7 @@ impl AesGmacSiv {
 
         self.tmp[12] &= 0x7f;
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k1.len() {
 				16 => ffi::EVP_aes_128_ctr(),
@@ -170,7 +170,7 @@ impl AesGmacSiv {
         self.tmp.copy_from_slice(tag);
         self.tmp[12] &= 0x7f;
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k1.len() {
 				16 => ffi::EVP_aes_128_ctr(),
@@ -184,7 +184,7 @@ impl AesGmacSiv {
 
         let mut tag_tmp = [0_u8; 32];
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k1.len() {
 				16 => ffi::EVP_aes_128_ecb(),
@@ -199,7 +199,7 @@ impl AesGmacSiv {
         self.tag.copy_from_slice(&tag_tmp[0..16]);
         tag_tmp[8..12].fill(0);
 
-        let mut ctx = CipherCtx::new().unwrap();
+        let ctx = CipherCtx::new().unwrap();
 		unsafe {
 			let t = match self.k0.len() {
 				16 => ffi::EVP_aes_128_gcm(),
