@@ -7,6 +7,7 @@ members = [
     "service",
     "vl1-service",
     "utils",
+    "openssl-sys",
 ]
 
 [profile.release]

@@ -2,6 +2,7 @@
 
 use std::ffi::c_void;
 use std::io::Write;
+use std::mem::MaybeUninit;
 use std::os::raw::{c_int, c_uint};
 use std::ptr::null;
 
@@ -10,39 +11,58 @@ pub const SHA384_HASH_SIZE: usize = 48;
 pub const HMAC_SHA512_SIZE: usize = 64;
 pub const HMAC_SHA384_SIZE: usize = 48;
 
-pub struct SHA512(Option<openssl::sha::Sha512>);
+pub struct SHA512(ffi::SHA512_CTX);
 
 impl SHA512 {
     #[inline(always)]
-    pub fn hash(b: &[u8]) -> [u8; SHA512_HASH_SIZE] {
-        openssl::sha::sha512(b)
+    pub fn hash(data: &[u8]) -> [u8; SHA512_HASH_SIZE] {
+        unsafe {
+            let mut hash = MaybeUninit::<[u8; 64]>::uninit();
+            ffi::SHA512(data.as_ptr(), data.len(), hash.as_mut_ptr() as *mut _);
+            hash.assume_init()
+        }
     }
 
+    /// Creates a new hasher.
     #[inline(always)]
     pub fn new() -> Self {
-        Self(Some(openssl::sha::Sha512::new()))
+        unsafe {
+            let mut ctx = MaybeUninit::uninit();
+            ffi::SHA512_Init(ctx.as_mut_ptr());
+            SHA512(ctx.assume_init())
+        }
     }
 
+    /// Feeds some data into the hasher.
+    ///
+    /// This can be called multiple times.
     #[inline(always)]
     pub fn reset(&mut self) {
-        let _ = self.0.replace(openssl::sha::Sha512::new());
+        unsafe { ffi::SHA512_Init(&mut self.0) };
     }
 
     #[inline(always)]
-    pub fn update(&mut self, b: &[u8]) {
-        self.0.as_mut().unwrap().update(b);
+    pub fn update(&mut self, buf: &[u8]) {
+        unsafe {
+            ffi::SHA512_Update(&mut self.0, buf.as_ptr() as *const c_void, buf.len());
+        }
     }
 
+    /// Returns the hash of the data.
     #[inline(always)]
     pub fn finish(&mut self) -> [u8; SHA512_HASH_SIZE] {
-        self.0.take().unwrap().finish()
+        unsafe {
+            let mut hash = MaybeUninit::<[u8; 64]>::uninit();
+            ffi::SHA512_Final(hash.as_mut_ptr() as *mut _, &mut self.0);
+            hash.assume_init()
+        }
     }
 }
 
 impl Write for SHA512 {
     #[inline(always)]
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-        self.0.as_mut().unwrap().update(b);
+        self.update(b);
         Ok(b.len())
     }
 
@@ -54,39 +74,55 @@ impl Write for SHA512 {
 
 unsafe impl Send for SHA512 {}
 
-pub struct SHA384(Option<openssl::sha::Sha384>);
+pub struct SHA384(ffi::SHA512_CTX);
 
 impl SHA384 {
     #[inline(always)]
-    pub fn hash(b: &[u8]) -> [u8; SHA384_HASH_SIZE] {
-        openssl::sha::sha384(b)
+    pub fn hash(data: &[u8]) -> [u8; SHA384_HASH_SIZE] {
+        unsafe {
+            let mut hash = MaybeUninit::<[u8; 48]>::uninit();
+            ffi::SHA384(data.as_ptr(), data.len(), hash.as_mut_ptr() as *mut _);
+            hash.assume_init()
+        }
     }
 
     #[inline(always)]
     pub fn new() -> Self {
-        Self(Some(openssl::sha::Sha384::new()))
+        unsafe {
+            let mut ctx = MaybeUninit::uninit();
+            ffi::SHA384_Init(ctx.as_mut_ptr());
+            SHA384(ctx.assume_init())
+        }
     }
 
     #[inline(always)]
     pub fn reset(&mut self) {
-        let _ = self.0.replace(openssl::sha::Sha384::new());
+        unsafe {
+            ffi::SHA384_Init(&mut self.0);
+        }
     }
 
     #[inline(always)]
-    pub fn update(&mut self, b: &[u8]) {
-        self.0.as_mut().unwrap().update(b);
+    pub fn update(&mut self, buf: &[u8]) {
+        unsafe {
+            ffi::SHA384_Update(&mut self.0, buf.as_ptr() as *const c_void, buf.len());
+        }
     }
 
     #[inline(always)]
     pub fn finish(&mut self) -> [u8; SHA384_HASH_SIZE] {
-        self.0.take().unwrap().finish()
+        unsafe {
+            let mut hash = MaybeUninit::<[u8; 48]>::uninit();
+            ffi::SHA384_Final(hash.as_mut_ptr() as *mut _, &mut self.0);
+            hash.assume_init()
+        }
     }
 }
 
 impl Write for SHA384 {
     #[inline(always)]
     fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-        self.0.as_mut().unwrap().update(b);
+        self.update(b);
         Ok(b.len())
     }
 
