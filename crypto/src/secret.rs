@@ -39,6 +39,7 @@ impl<const L: usize> Secret<L> {
         unsafe { OPENSSL_cleanse(b.as_mut_ptr().cast(), L) };
         ret
     }
+    #[inline(always)]
     pub unsafe fn from_bytes(b: &[u8]) -> Self {
         Self (b.try_into().unwrap())
     }

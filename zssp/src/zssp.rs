@@ -14,8 +14,8 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 
-use zerotier_crypto::aes::{Aes, AesCtr, AesGcm};
-use zerotier_crypto::hash::{hmac_sha512, HMACSHA384, HMAC_SHA384_SIZE, SHA384, SHA384_HASH_SIZE};
+use zerotier_crypto::aes::{AesEcb, AesCtr, AesGcm};
+use zerotier_crypto::hash::{hmac_sha512, HMACSHA384, HMAC_SHA384_SIZE, SHA384, SHA384_HASH_SIZE, hmac_sha512_secret};
 use zerotier_crypto::p384::{P384KeyPair, P384PublicKey, P384_ECDH_SHARED_SECRET_SIZE, P384_PUBLIC_KEY_SIZE};
 use zerotier_crypto::secret::Secret;
 use zerotier_crypto::{random, secure_eq};
@@ -79,7 +79,8 @@ pub struct Session<Application: ApplicationLayer> {
     psk: Secret<BASE_KEY_SIZE>,
     send_counter: AtomicU64,
     receive_window: [AtomicU64; COUNTER_WINDOW_MAX_OOO],
-    header_protection_cipher: Aes,
+    header_protection_cipher_in: AesEcb<false>,
+    header_protection_cipher_out: AesEcb<true>,
     state: RwLock<State>,
     defrag: Mutex<RingBufferMap<u64, GatherArray<Application::IncomingPacketBuffer, MAX_FRAGMENTS>, 16, 16>>,
 }
@@ -127,8 +128,8 @@ struct SessionKey {
     ratchet_key: Secret<BASE_KEY_SIZE>,           // Key used in derivation of the next session key
     receive_key: Secret<AES_256_KEY_SIZE>,        // Receive side AES-GCM key
     send_key: Secret<AES_256_KEY_SIZE>,           // Send side AES-GCM key
-    receive_cipher_pool: Mutex<Vec<Box<AesGcm>>>, // Pool of reusable sending ciphers
-    send_cipher_pool: Mutex<Vec<Box<AesGcm>>>,    // Pool of reusable receiving ciphers
+    receive_cipher_pool: Mutex<Vec<Box<AesGcm<false>>>>, // Pool of reusable sending ciphers
+    send_cipher_pool: Mutex<Vec<Box<AesGcm<true>>>>,    // Pool of reusable receiving ciphers
     rekey_at_time: i64,                           // Rekey at or after this time (ticks)
     created_at_counter: u64,                      // Counter at which session was created
     rekey_at_counter: u64,                        // Rekey at or after this counter
@@ -282,7 +283,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                 psk,
                 send_counter: AtomicU64::new(3), // 1 and 2 are reserved for init and final ack
                 receive_window: std::array::from_fn(|_| AtomicU64::new(0)),
-                header_protection_cipher: Aes::new(header_protection_key.as_bytes()),
+                header_protection_cipher_in: AesEcb::new(&header_protection_key),
+                header_protection_cipher_out: AesEcb::new(&header_protection_key),
                 state: RwLock::new(State {
                     remote_session_id: None,
                     keys: [None, None],
@@ -319,8 +321,8 @@ impl<Application: ApplicationLayer> Context<Application> {
             init.alice_hk_public = alice_hk_secret.public;
             init.header_protection_key = header_protection_key.0;
 
-            aes_ctr_crypt_one_time_use_key(
-                kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es.as_bytes()).as_bytes(),
+            aes_ctr_encrypt_one_time_use_key(
+                &kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es.as_bytes()),
                 &mut init_packet[AliceNoiseXKInit::ENC_START..AliceNoiseXKInit::AUTH_START],
             );
 
@@ -407,8 +409,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                 debug_assert!(!self.sessions.read().unwrap().incoming.contains_key(&local_session_id));
 
                 session
-                    .header_protection_cipher
-                    .decrypt_block_in_place(&mut incoming_packet[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
+                    .header_protection_cipher_in
+                    .crypt_in_place(&mut incoming_packet[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
                 let (key_index, packet_type, fragment_count, fragment_no, incoming_counter) = parse_packet_header(&incoming_packet);
 
                 if session.check_receive_window(incoming_counter) {
@@ -461,8 +463,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                 }
             } else {
                 if let Some(i) = self.sessions.read().unwrap().incoming.get(&local_session_id).cloned() {
-                    Aes::new(i.header_protection_key.as_bytes())
-                        .decrypt_block_in_place(&mut incoming_packet[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
+                    AesEcb::<false>::new(&i.header_protection_key)
+                        .crypt_in_place(&mut incoming_packet[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
                     incoming = Some(i);
                 } else {
                     return Err(Error::UnknownLocalSessionId);
@@ -547,7 +549,7 @@ impl<Application: ApplicationLayer> Context<Application> {
                 let state = session.state.read().unwrap();
                 if let Some(key) = state.keys[key_index].as_ref() {
                     let mut c = key.get_receive_cipher();
-                    c.reset_init_gcm(&incoming_message_nonce);
+                    c.set_iv(&incoming_message_nonce);
 
                     let mut data_len = 0;
 
@@ -693,8 +695,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                         }
 
                         // Decrypt encrypted part of payload.
-                        aes_ctr_crypt_one_time_use_key(
-                            kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es.as_bytes()).as_bytes(),
+                        aes_ctr_decrypt_one_time_use_key(
+                            &kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es.as_bytes()),
                             &mut pkt_assembled[AliceNoiseXKInit::ENC_START..AliceNoiseXKInit::AUTH_START],
                         );
 
@@ -772,8 +774,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                     ack.bob_hk_ciphertext = bob_hk_ciphertext;
 
                     // Encrypt main section of reply.
-                    aes_ctr_crypt_one_time_use_key(
-                        kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es_ee.as_bytes()).as_bytes(),
+                    aes_ctr_encrypt_one_time_use_key(
+                        &kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es_ee.as_bytes()),
                         &mut ack_packet[BobNoiseXKAck::ENC_START..BobNoiseXKAck::AUTH_START],
                     );
 
@@ -793,7 +795,7 @@ impl<Application: ApplicationLayer> Context<Application> {
                         Some(alice_session_id),
                         0,
                         1,
-                        Some(&Aes::new(header_protection_key.as_bytes())),
+                        Some(&AesEcb::new(&header_protection_key)),
                     )?;
 
                     return Ok(ReceiveResult::Ok);
@@ -844,8 +846,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                             }
 
                             // Decrypt encrypted portion of message.
-                            aes_ctr_crypt_one_time_use_key(
-                                kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es_ee.as_bytes()).as_bytes(),
+                            aes_ctr_decrypt_one_time_use_key(
+                                &kbkdf::<AES_256_KEY_SIZE, KBKDF_KEY_USAGE_LABEL_KEX_ENCRYPTION>(noise_es_ee.as_bytes()),
                                 &mut pkt_assembled[BobNoiseXKAck::ENC_START..BobNoiseXKAck::AUTH_START],
                             );
                             let pkt: &BobNoiseXKAck = byte_array_as_proto_buffer(pkt_assembled)?;
@@ -895,8 +897,8 @@ impl<Application: ApplicationLayer> Context<Application> {
 
                                 // Encrypt Alice's static identity and other inner payload items. The key used here is
                                 // mixed with 'hk' to make identity secrecy PQ forward secure.
-                                aes_ctr_crypt_one_time_use_key(
-                                    &hmac_sha512(noise_es_ee.as_bytes(), hk.as_bytes())[..AES_256_KEY_SIZE],
+                                aes_ctr_encrypt_one_time_use_key(
+                                    &hmac_sha512_secret::<AES_256_KEY_SIZE>(noise_es_ee.as_bytes(), hk.as_bytes()),
                                     &mut reply_buffer[HEADER_SIZE + 1..reply_len],
                                 );
 
@@ -940,7 +942,7 @@ impl<Application: ApplicationLayer> Context<Application> {
                                     Some(bob_session_id),
                                     0,
                                     2,
-                                    Some(&session.header_protection_cipher),
+                                    Some(&session.header_protection_cipher_out),
                                 )?;
 
                                 return Ok(ReceiveResult::Ok);
@@ -999,8 +1001,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                         pkt_assembly_buffer_copy[..pkt_assembled.len()].copy_from_slice(pkt_assembled);
 
                         // Decrypt encrypted section so we can finally learn Alice's static identity.
-                        aes_ctr_crypt_one_time_use_key(
-                            &hmac_sha512(incoming.noise_es_ee.as_bytes(), incoming.hk.as_bytes())[..AES_256_KEY_SIZE],
+                        aes_ctr_decrypt_one_time_use_key(
+                            &hmac_sha512_secret::<AES_256_KEY_SIZE>(incoming.noise_es_ee.as_bytes(), incoming.hk.as_bytes()),
                             &mut pkt_assembled[ALICE_NOISE_XK_ACK_ENC_START..auth_start],
                         );
 
@@ -1074,7 +1076,8 @@ impl<Application: ApplicationLayer> Context<Application> {
                             psk,
                             send_counter: AtomicU64::new(2), // 1 was already used during negotiation
                             receive_window: std::array::from_fn(|_| AtomicU64::new(0)),
-                            header_protection_cipher: Aes::new(incoming.header_protection_key.as_bytes()),
+                            header_protection_cipher_in: AesEcb::new(&incoming.header_protection_key),
+                            header_protection_cipher_out: AesEcb::new(&incoming.header_protection_key),
                             state: RwLock::new(State {
                                 remote_session_id: Some(incoming.alice_session_id),
                                 keys: [
@@ -1114,7 +1117,7 @@ impl<Application: ApplicationLayer> Context<Application> {
                             // Only the current "Alice" accepts rekeys initiated by the current "Bob."
                             if !key.bob {
                                 let mut c = key.get_receive_cipher();
-                                c.reset_init_gcm(&incoming_message_nonce);
+                                c.set_iv(&incoming_message_nonce);
                                 c.crypt_in_place(&mut pkt_assembled[AliceRekeyInit::ENC_START..AliceRekeyInit::AUTH_START]);
                                 let aead_authentication_ok = c.finish_decrypt(&pkt_assembled[AliceRekeyInit::AUTH_START..]);
                                 key.return_receive_cipher(c);
@@ -1135,7 +1138,7 @@ impl<Application: ApplicationLayer> Context<Application> {
 
                                         let counter = session.get_next_outgoing_counter().ok_or(Error::MaxKeyLifetimeExceeded)?;
                                         let mut c = key.get_send_cipher(counter.get())?;
-                                        c.reset_init_gcm(&create_message_nonce(PACKET_TYPE_BOB_REKEY_ACK, counter.get()));
+                                        c.set_iv(&create_message_nonce(PACKET_TYPE_BOB_REKEY_ACK, counter.get()));
                                         c.crypt_in_place(&mut reply_buf[BobRekeyAck::ENC_START..BobRekeyAck::AUTH_START]);
                                         reply_buf[BobRekeyAck::AUTH_START..].copy_from_slice(&c.finish_encrypt());
                                         key.return_send_cipher(c);
@@ -1178,7 +1181,7 @@ impl<Application: ApplicationLayer> Context<Application> {
                                 // Only the current "Bob" initiates rekeys and expects this ACK.
                                 if key.bob {
                                     let mut c = key.get_receive_cipher();
-                                    c.reset_init_gcm(&incoming_message_nonce);
+                                    c.set_iv(&incoming_message_nonce);
                                     c.crypt_in_place(&mut pkt_assembled[BobRekeyAck::ENC_START..BobRekeyAck::AUTH_START]);
                                     let aead_authentication_ok = c.finish_decrypt(&pkt_assembled[BobRekeyAck::AUTH_START..]);
                                     key.return_receive_cipher(c);
@@ -1246,7 +1249,7 @@ impl<Application: ApplicationLayer> Session<Application> {
                 let counter = self.get_next_outgoing_counter().ok_or(Error::MaxKeyLifetimeExceeded)?.get();
 
                 let mut c = session_key.get_send_cipher(counter)?;
-                c.reset_init_gcm(&create_message_nonce(PACKET_TYPE_DATA, counter));
+                c.set_iv(&create_message_nonce(PACKET_TYPE_DATA, counter));
 
                 let fragment_count =
                     (((data.len() + AES_GCM_TAG_SIZE) as f32) / (mtu_sized_buffer.len() - HEADER_SIZE) as f32).ceil() as usize;
@@ -1277,8 +1280,8 @@ impl<Application: ApplicationLayer> Session<Application> {
                         fragment_size = tagged_fragment_size;
                     }
 
-                    self.header_protection_cipher
-                        .encrypt_block_in_place(&mut mtu_sized_buffer[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
+                    self.header_protection_cipher_out
+                        .crypt_in_place(&mut mtu_sized_buffer[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
                     send(&mut mtu_sized_buffer[..fragment_size]);
                 }
                 debug_assert!(data.is_empty());
@@ -1314,7 +1317,7 @@ impl<Application: ApplicationLayer> Session<Application> {
             if let Some(key) = state.keys[state.current_key].as_ref() {
                 if let Some(counter) = self.get_next_outgoing_counter() {
                     if let Ok(mut gcm) = key.get_send_cipher(counter.get()) {
-                        gcm.reset_init_gcm(&create_message_nonce(PACKET_TYPE_ALICE_REKEY_INIT, counter.get()));
+                        gcm.set_iv(&create_message_nonce(PACKET_TYPE_ALICE_REKEY_INIT, counter.get()));
                         gcm.crypt_in_place(&mut rekey_buf[AliceRekeyInit::ENC_START..AliceRekeyInit::AUTH_START]);
                         rekey_buf[AliceRekeyInit::AUTH_START..].copy_from_slice(&gcm.finish_encrypt());
                         key.return_send_cipher(gcm);
@@ -1420,7 +1423,7 @@ fn send_with_fragmentation<SendFunction: FnMut(&mut [u8])>(
     remote_session_id: Option<SessionId>,
     key_index: usize,
     counter: u64,
-    header_protect_cipher: Option<&Aes>,
+    header_protect_cipher: Option<&AesEcb<true>>,
 ) -> Result<(), Error> {
     let packet_len = packet.len();
     let recipient_session_id = remote_session_id.map_or(SessionId::NONE, |s| u64::from(s));
@@ -1439,7 +1442,7 @@ fn send_with_fragmentation<SendFunction: FnMut(&mut [u8])>(
             counter,
         );
         if let Some(hcc) = header_protect_cipher {
-            hcc.encrypt_block_in_place(&mut fragment[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
+            hcc.crypt_in_place(&mut fragment[HEADER_PROTECT_ENCRYPT_START..HEADER_PROTECT_ENCRYPT_END]);
         }
         send(fragment);
         fragment_start = fragment_end - HEADER_SIZE;
@@ -1500,14 +1503,14 @@ impl SessionKey {
         }
     }
 
-    fn get_send_cipher(&self, counter: u64) -> Result<Box<AesGcm>, Error> {
+    fn get_send_cipher(&self, counter: u64) -> Result<Box<AesGcm<true>>, Error> {
         if counter < self.expire_at_counter {
             Ok(self
                 .send_cipher_pool
                 .lock()
                 .unwrap()
                 .pop()
-                .unwrap_or_else(|| Box::new(AesGcm::new(self.send_key.as_bytes(), true))))
+                .unwrap_or_else(|| Box::new(AesGcm::new(&self.send_key))))
         } else {
             // Not only do we return an error, but we also destroy the key.
             let mut scp = self.send_cipher_pool.lock().unwrap();
@@ -1518,19 +1521,19 @@ impl SessionKey {
         }
     }
 
-    fn return_send_cipher(&self, c: Box<AesGcm>) {
+    fn return_send_cipher(&self, c: Box<AesGcm<true>>) {
         self.send_cipher_pool.lock().unwrap().push(c);
     }
 
-    fn get_receive_cipher(&self) -> Box<AesGcm> {
+    fn get_receive_cipher(&self) -> Box<AesGcm<false>> {
         self.receive_cipher_pool
             .lock()
             .unwrap()
             .pop()
-            .unwrap_or_else(|| Box::new(AesGcm::new(self.receive_key.as_bytes(), false)))
+            .unwrap_or_else(|| Box::new(AesGcm::new(&self.receive_key)))
     }
 
-    fn return_receive_cipher(&self, c: Box<AesGcm>) {
+    fn return_receive_cipher(&self, c: Box<AesGcm<false>>) {
         self.receive_cipher_pool.lock().unwrap().push(c);
     }
 }
@@ -1543,13 +1546,22 @@ fn hmac_sha384_2(key: &[u8], a: &[u8], b: &[u8]) -> [u8; 48] {
     hmac.finish()
 }
 
-/// Shortcut to AES-CTR encrypt or decrypt with a zero IV.
+/// Shortcut to AES-CTR encrypt with a zero IV.
 ///
 /// This is used during Noise_XK handshaking. Each stage uses a different key to encrypt the
 /// payload that is used only once per handshake and per session.
-fn aes_ctr_crypt_one_time_use_key(key: &[u8], data: &mut [u8]) {
-    let mut ctr = AesCtr::new(key);
-    ctr.reset_set_iv(&[0u8; 12]);
+fn aes_ctr_encrypt_one_time_use_key<const C: usize>(key: &Secret<C>, data: &mut [u8]) {
+    let mut ctr = AesCtr::<false>::new(key);
+    ctr.set_iv(&[0u8; 12]);
+    ctr.crypt_in_place(data);
+}
+/// Shortcut to AES-CTR decrypt with a zero IV.
+///
+/// This is used during Noise_XK handshaking. Each stage uses a different key to encrypt the
+/// payload that is used only once per handshake and per session.
+fn aes_ctr_decrypt_one_time_use_key<const C: usize>(key: &Secret<C>, data: &mut [u8]) {
+    let mut ctr = AesCtr::<false>::new(key);
+    ctr.set_iv(&[0u8; 12]);
     ctr.crypt_in_place(data);
 }
 
@@ -1558,19 +1570,17 @@ fn aes_ctr_crypt_one_time_use_key(key: &[u8], data: &mut [u8]) {
 fn kbkdf<const OUTPUT_BYTES: usize, const LABEL: u8>(key: &[u8]) -> Secret<OUTPUT_BYTES> {
     //These are the values we have assigned to the 5 variables involved in https://csrc.nist.gov/publications/detail/sp/800-108/final:
     // K_in = key, i = 0x01, Label = 'Z'||'T'||LABEL, Context = 0x00, L = (OUTPUT_BYTES * 8)
-    Secret::<OUTPUT_BYTES>::from_bytes(
-        &hmac_sha512(
-            key,
-            &[
-                1,
-                b'Z',
-                b'T',
-                LABEL,
-                0x00,
-                0,
-                (((OUTPUT_BYTES * 8) >> 8) & 0xff) as u8,
-                ((OUTPUT_BYTES * 8) & 0xff) as u8,
-            ],
-        )[..OUTPUT_BYTES],
+    hmac_sha512_secret(
+        key,
+        &[
+            1,
+            b'Z',
+            b'T',
+            LABEL,
+            0x00,
+            0,
+            (((OUTPUT_BYTES * 8) >> 8) & 0xff) as u8,
+            ((OUTPUT_BYTES * 8) & 0xff) as u8,
+        ],
     )
 }

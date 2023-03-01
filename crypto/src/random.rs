@@ -89,7 +89,32 @@ impl rand_core::RngCore for SecureRandom {
     }
 }
 
+/// ed25519-dalek still uses rand_core 0.5.1, and that version is incompatible with 0.6.4, so we need to import and implement both.
+impl rand_core_051::RngCore for SecureRandom {
+    #[inline(always)]
+    fn next_u32(&mut self) -> u32 {
+        next_u32_secure()
+    }
+
+    #[inline(always)]
+    fn next_u64(&mut self) -> u64 {
+        next_u64_secure()
+    }
+
+    #[inline(always)]
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        fill_bytes_secure(dest);
+    }
+
+    #[inline(always)]
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core_051::Error> {
+        fill_bytes_secure(dest);
+        Ok(())
+    }
+}
+
 impl rand_core::CryptoRng for SecureRandom {}
+impl rand_core_051::CryptoRng for SecureRandom {}
 
 unsafe impl Sync for SecureRandom {}
 unsafe impl Send for SecureRandom {}
