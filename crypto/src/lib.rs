@@ -21,7 +21,6 @@ pub mod x25519;
 /// This must be called before using any function from this library.
 pub fn init() {
     ffi::init();
-    lazy_static::initialize(&p384::GROUP_P384);
 }
 
 /// Constant time byte slice equality.

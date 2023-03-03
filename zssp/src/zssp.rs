@@ -140,6 +140,7 @@ struct SessionKey {
 impl<Application: ApplicationLayer> Context<Application> {
     /// Create a new session context.
     pub fn new(max_incomplete_session_queue_size: usize) -> Self {
+        zerotier_crypto::init();
         Self {
             max_incomplete_session_queue_size,
             defrag: Mutex::new(RingBufferMap::new(random::next_u32_secure())),
