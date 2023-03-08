@@ -1,0 +1,44 @@
+<html>
+
+<body>
+    <script>
+        let w = new Worker('zt-worker.js');
+        w.onmessage = (e) => {
+            console.log(e.data);
+        };
+
+        function functionToMessage(func, thisObject) {
+            let text = func.toString();
+            let bodyStart = text.indexOf('{');
+            let bodyEnd = text.lastIndexOf('}');
+            if (bodyStart < 0) {
+                bodyStart = text.indexOf('=>') + 1;
+                bodyEnd = text.length;
+            }
+            let argsStart = text.indexOf('(');
+            let argsEnd = text.indexOf(')');
+            if (argsStart < 0 || argsStart >= bodyStart) {
+                argsStart = -1;
+                argsEnd = text.indexOf('=>');
+            }
+            let args = text.substring(argsStart + 1, argsEnd)
+                .split(',')
+                .map(x => x.trim());
+            let body = text.substring(bodyStart + 1, bodyEnd);
+            return { args, body, thisObject };
+        }
+
+        function callback(counter, address, bits, expected)
+        {
+            console.log(counter, address, bits, expected);
+            if (address[9] == '0') return true;
+            return false;
+        };
+
+        window.onload = () => {
+            w.postMessage({ type: 'generate', token: 12, vanity: '0', vanityCallback: functionToMessage(callback) });
+        };
+    </script>
+</body>
+
+</html>

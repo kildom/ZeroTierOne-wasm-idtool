@@ -15,15 +15,15 @@ LDLIBS?=
 DESTDIR?=
 
 include objects.mk
-ONE_OBJS+=osdep/LinuxEthernetTap.o
-ONE_OBJS+=osdep/LinuxNetLink.o
+#ONE_OBJS+=osdep/LinuxEthernetTap.o
+#ONE_OBJS+=osdep/LinuxNetLink.o
 
 # for central controller buildsk
 TIMESTAMP=$(shell date +"%Y%m%d%H%M")
 
 # Auto-detect miniupnpc and nat-pmp as well and use system libs if present,
 # otherwise build into binary as done on Mac and Windows.
-ONE_OBJS+=osdep/PortMapper.o
+#ONE_OBJS+=osdep/PortMapper.o
 override DEFS+=-DZT_USE_MINIUPNPC
 MINIUPNPC_IS_NEW_ENOUGH=$(shell grep -sqr '.*define.*MINIUPNPC_VERSION.*"2..*"' /usr/include/miniupnpc/miniupnpc.h && echo 1)
 #MINIUPNPC_IS_NEW_ENOUGH=$(shell grep -sqr '.*define.*MINIUPNPC_VERSION.*"2.."' /usr/include/miniupnpc/miniupnpc.h && echo 1)
@@ -32,10 +32,10 @@ ifeq ($(MINIUPNPC_IS_NEW_ENOUGH),1)
 	LDLIBS+=-lminiupnpc
 else
 	override DEFS+=-DMINIUPNP_STATICLIB -DMINIUPNPC_SET_SOCKET_TIMEOUT -DMINIUPNPC_GET_SRC_ADDR -D_BSD_SOURCE -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=600 -DOS_STRING="\"Linux\"" -DMINIUPNPC_VERSION_STRING="\"2.0\"" -DUPNP_VERSION_STRING="\"UPnP/1.1\"" -DENABLE_STRNATPMPERR
-	ONE_OBJS+=ext/miniupnpc/connecthostport.o ext/miniupnpc/igd_desc_parse.o ext/miniupnpc/minisoap.o ext/miniupnpc/minissdpc.o ext/miniupnpc/miniupnpc.o ext/miniupnpc/miniwget.o ext/miniupnpc/minixml.o ext/miniupnpc/portlistingparse.o ext/miniupnpc/receivedata.o ext/miniupnpc/upnpcommands.o ext/miniupnpc/upnpdev.o ext/miniupnpc/upnperrors.o ext/miniupnpc/upnpreplyparse.o
+	#ONE_OBJS+=ext/miniupnpc/connecthostport.o ext/miniupnpc/igd_desc_parse.o ext/miniupnpc/minisoap.o ext/miniupnpc/minissdpc.o ext/miniupnpc/miniupnpc.o ext/miniupnpc/miniwget.o ext/miniupnpc/minixml.o ext/miniupnpc/portlistingparse.o ext/miniupnpc/receivedata.o ext/miniupnpc/upnpcommands.o ext/miniupnpc/upnpdev.o ext/miniupnpc/upnperrors.o ext/miniupnpc/upnpreplyparse.o
 endif
 ifeq ($(wildcard /usr/include/natpmp.h),)
-	ONE_OBJS+=ext/libnatpmp/natpmp.o ext/libnatpmp/getgateway.o
+	#ONE_OBJS+=ext/libnatpmp/natpmp.o ext/libnatpmp/getgateway.o
 else
 	LDLIBS+=-lnatpmp
 	override DEFS+=-DZT_USE_SYSTEM_NATPMP
@@ -43,7 +43,7 @@ endif
 
 # Use bundled http-parser since distribution versions are NOT API-stable or compatible!
 # Trying to use dynamically linked libhttp-parser causes tons of compatibility problems.
-ONE_OBJS+=ext/http-parser/http_parser.o
+#ONE_OBJS+=ext/http-parser/http_parser.o
 
 ifeq ($(ZT_RULES_ENGINE_DEBUGGING),1)
 	override DEFS+=-DZT_RULES_ENGINE_DEBUGGING
@@ -58,19 +58,19 @@ ifeq ($(ZT_SANITIZE),1)
 	override DEFS+=-fsanitize=address -DASAN_OPTIONS=symbolize=1
 endif
 ifeq ($(ZT_DEBUG),1)
-	override CFLAGS+=-Wall -Wno-deprecated -g -O -pthread $(INCLUDES) $(DEFS)
-	override CXXFLAGS+=-Wall -Wno-deprecated -g -O -std=c++17 -pthread $(INCLUDES) $(DEFS)
+	override CFLAGS+=-Wall -Wno-deprecated -g -O $(INCLUDES) $(DEFS)
+	override CXXFLAGS+=-Wall -Wno-deprecated -g -O -std=c++17 $(INCLUDES) $(DEFS)
 	ZT_TRACE=1
 	RUSTFLAGS=
 	# The following line enables optimization for the crypto code, since
 	# C25519 in particular is almost UNUSABLE in -O0 even on a 3ghz box!
-node/Salsa20.o node/SHA512.o node/C25519.o node/Poly1305.o: CXXFLAGS=-Wall -O2 -g -pthread $(INCLUDES) $(DEFS)
+node/Salsa20.o node/SHA512.o node/C25519.o node/Poly1305.o: CXXFLAGS=-Wall -O2 -g $(INCLUDES) $(DEFS)
 else
 	CFLAGS?=-O3 -fstack-protector
-	override CFLAGS+=-Wall -Wno-deprecated -pthread $(INCLUDES) -DNDEBUG $(DEFS)
+	override CFLAGS+=-Wall -Wno-deprecated $(INCLUDES) -DNDEBUG $(DEFS)
 	CXXFLAGS?=-O3 -fstack-protector
-	override CXXFLAGS+=-Wall -Wno-deprecated -std=c++17 -pthread $(INCLUDES) -DNDEBUG $(DEFS)
-	LDFLAGS=-pie -Wl,-z,relro,-z,now
+	override CXXFLAGS+=-Wall -Wno-deprecated -std=c++17 $(INCLUDES) -DNDEBUG $(DEFS)
+#	LDFLAGS=-pie -Wl,-z,relro,-z,now
 	RUSTFLAGS=--release
 endif
 
@@ -112,7 +112,7 @@ endif
 # Determine system build architecture from compiler target
 CC_MACH=$(shell $(CC) -dumpmachine | cut -d '-' -f 1)
 ZT_ARCHITECTURE=999
-ifeq ($(CC_MACH),x86_64)
+ifeq ($(CC_MACH),xx86_64)
 	ZT_ARCHITECTURE=2
 	ZT_USE_X64_ASM_SALSA=1
 	ZT_USE_X64_ASM_ED25519=1
@@ -120,7 +120,7 @@ ifeq ($(CC_MACH),x86_64)
 	override CXXFLAGS+=-msse -msse2
 	ZT_SSO_SUPPORTED=1
 endif
-ifeq ($(CC_MACH),amd64)
+ifeq ($(CC_MACH),xamd64)
 	ZT_ARCHITECTURE=2
 	ZT_USE_X64_ASM_SALSA=1
 	ZT_USE_X64_ASM_ED25519=1
@@ -262,6 +262,7 @@ ifeq ($(CC_MACH),loongarch64)
 	ZT_ARCHITECTURE=17
 	override DEFS+=-DZT_NO_TYPE_PUNNING
 endif
+ZT_ARCHITECTURE=15
 
 # Fail if system architecture could not be determined
 ifeq ($(ZT_ARCHITECTURE),999)
@@ -358,6 +359,7 @@ from_builder:	FORCE
 
 zerotier-one:	$(CORE_OBJS) $(ONE_OBJS) one.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o zerotier-one $(CORE_OBJS) $(ONE_OBJS) one.o $(LDLIBS)
+	$(WASM_OPT) zerotier-one -o zerotier-idtool.wasm
 
 zerotier-idtool: zerotier-one
 	ln -sf zerotier-one zerotier-idtool

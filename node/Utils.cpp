@@ -214,90 +214,16 @@ char *Utils::decimal(unsigned long n,char s[24])
 	return s;
 }
 
+#define WASM_IMPORT(name) \
+    __attribute__((used)) \
+    __attribute__((import_name(#name)))
+
+WASM_IMPORT(getRandom)
+void getRandom(void *buf,unsigned int bytes);
+
 void Utils::getSecureRandom(void *buf,unsigned int bytes)
 {
-	static Mutex globalLock;
-	static Salsa20 s20;
-	static bool s20Initialized = false;
-	static uint8_t randomBuf[65536];
-	static unsigned int randomPtr = sizeof(randomBuf);
-
-	Mutex::Lock _l(globalLock);
-
-	/* Just for posterity we Salsa20 encrypt the result of whatever system
-	 * CSPRNG we use. There have been several bugs at the OS or OS distribution
-	 * level in the past that resulted in systematically weak or predictable
-	 * keys due to random seeding problems. This mitigates that by grabbing
-	 * a bit of extra entropy and further randomizing the result, and comes
-	 * at almost no cost and with no real downside if the random source is
-	 * good. */
-	if (!s20Initialized) {
-		s20Initialized = true;
-		uint64_t s20Key[4];
-		s20Key[0] = (uint64_t)time(0); // system clock
-		s20Key[1] = (uint64_t)buf; // address of buf
-		s20Key[2] = (uint64_t)s20Key; // address of s20Key[]
-		s20Key[3] = (uint64_t)&s20; // address of s20
-		s20.init(s20Key,s20Key);
-	}
-
-#ifdef __WINDOWS__
-
-	static HCRYPTPROV cryptProvider = NULL;
-
-	for(unsigned int i=0;i<bytes;++i) {
-		if (randomPtr >= sizeof(randomBuf)) {
-			if (cryptProvider == NULL) {
-				if (!CryptAcquireContextA(&cryptProvider,NULL,NULL,PROV_RSA_FULL,CRYPT_VERIFYCONTEXT|CRYPT_SILENT)) {
-					fprintf(stderr,"FATAL ERROR: Utils::getSecureRandom() unable to obtain WinCrypt context!\r\n");
-					exit(1);
-				}
-			}
-			if (!CryptGenRandom(cryptProvider,(DWORD)sizeof(randomBuf),(BYTE *)randomBuf)) {
-				fprintf(stderr,"FATAL ERROR: Utils::getSecureRandom() CryptGenRandom failed!\r\n");
-				exit(1);
-			}
-			randomPtr = 0;
-			s20.crypt12(randomBuf,randomBuf,sizeof(randomBuf));
-			s20.init(randomBuf,randomBuf);
-		}
-		((uint8_t *)buf)[i] = randomBuf[randomPtr++];
-	}
-
-#else // not __WINDOWS__
-
-	static int devURandomFd = -1;
-
-	if (devURandomFd < 0) {
-		devURandomFd = ::open("/dev/urandom",O_RDONLY);
-		if (devURandomFd < 0) {
-			fprintf(stderr,"FATAL ERROR: Utils::getSecureRandom() unable to open /dev/urandom\n");
-			exit(1);
-			return;
-		}
-	}
-
-	for(unsigned int i=0;i<bytes;++i) {
-		if (randomPtr >= sizeof(randomBuf)) {
-			for(;;) {
-				if ((int)::read(devURandomFd,randomBuf,sizeof(randomBuf)) != (int)sizeof(randomBuf)) {
-					::close(devURandomFd);
-					devURandomFd = ::open("/dev/urandom",O_RDONLY);
-					if (devURandomFd < 0) {
-						fprintf(stderr,"FATAL ERROR: Utils::getSecureRandom() unable to open /dev/urandom\n");
-						exit(1);
-						return;
-					}
-				} else break;
-			}
-			randomPtr = 0;
-			s20.crypt12(randomBuf,randomBuf,sizeof(randomBuf));
-			s20.init(randomBuf,randomBuf);
-		}
-		((uint8_t *)buf)[i] = randomBuf[randomPtr++];
-	}
-
-#endif // __WINDOWS__ or not
+	getRandom(buf, bytes);
 }
 
 } // namespace ZeroTier
